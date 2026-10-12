@@ -197,6 +197,61 @@ class Shift {
   );
 }
 
+class CashMovement {
+  CashMovement(
+    this.id,
+    this.requestId,
+    this.shiftId,
+    this.at,
+    this.direction,
+    this.amount,
+    this.person,
+    this.reason,
+    this.recordedBy, {
+    this.note = '',
+    this.approvedBy = '',
+  });
+  static const outReasons = [
+    'Owner withdrawal',
+    'Business purchase',
+    'Supplier payment',
+    'Other cash out',
+  ];
+  static const inReasons = ['Returned change', 'Cash top-up', 'Other cash in'];
+  final String id, requestId, shiftId, direction, person, reason, recordedBy;
+  final String note, approvedBy;
+  final DateTime at;
+  final int amount;
+  bool get isOut => direction == 'out';
+  int get signedAmount => isOut ? -amount : amount;
+  Json toJson() => {
+    'id': id,
+    'requestId': requestId,
+    'shiftId': shiftId,
+    'at': at.toIso8601String(),
+    'direction': direction,
+    'amount': amount,
+    'person': person,
+    'reason': reason,
+    'recordedBy': recordedBy,
+    'note': note,
+    'approvedBy': approvedBy,
+  };
+  factory CashMovement.fromJson(Json j) => CashMovement(
+    j['id'],
+    j['requestId'],
+    j['shiftId'],
+    DateTime.parse(j['at']),
+    j['direction'],
+    j['amount'],
+    j['person'],
+    j['reason'],
+    j['recordedBy'],
+    note: j['note'],
+    approvedBy: j['approvedBy'],
+  );
+}
+
 class PosSettings {
   String cafe = 'Café Jasmin',
       businessInfo = 'Tunis, Tunisia',
@@ -238,6 +293,7 @@ class PosData {
   List<Bill> bills = [], cancelledBills = [];
   List<Sale> sales = [];
   List<Shift> shifts = [];
+  List<CashMovement> cashMovements = [];
   String nextId(String prefix) => '$prefix-${++sequence}';
   List<Bill> get activeBills => bills.where((b) => !b.isEmptyDraft).toList();
   Bill? tableBill(String id, {bool includeEmpty = false}) {
@@ -262,7 +318,13 @@ class PosData {
       shift.opening +
       sales
           .where((s) => s.shiftId == shift.id && s.method == 'cash')
-          .fold(0, (a, s) => a + s.total);
+          .fold<int>(0, (a, s) => a + s.total) +
+      cashMovements
+          .where((m) => m.shiftId == shift.id)
+          .fold<int>(0, (a, m) => a + m.signedAmount);
+  int cashMovementTotal(String shiftId, String direction) => cashMovements
+      .where((m) => m.shiftId == shiftId && m.direction == direction)
+      .fold(0, (a, m) => a + m.amount);
   Json toJson() => {
     'schema': 1,
     'sequence': sequence,
@@ -276,6 +338,7 @@ class PosData {
     'cancelledBills': cancelledBills.map((e) => e.toJson()).toList(),
     'sales': sales.map((e) => e.toJson()).toList(),
     'shifts': shifts.map((e) => e.toJson()).toList(),
+    'cashMovements': cashMovements.map((e) => e.toJson()).toList(),
   };
   factory PosData.fromJson(Json j) {
     if (j['schema'] != 1) {
@@ -300,7 +363,11 @@ class PosData {
                   .toList()
           ..sales = (j['sales'] as List).map((e) => Sale.fromJson(e)).toList()
           ..shifts =
-              (j['shifts'] as List).map((e) => Shift.fromJson(e)).toList();
+              (j['shifts'] as List).map((e) => Shift.fromJson(e)).toList()
+          ..cashMovements =
+              ((j['cashMovements'] ?? []) as List)
+                  .map((e) => CashMovement.fromJson(e))
+                  .toList();
     d.validate();
     return d;
   }
@@ -317,6 +384,8 @@ class PosData {
     unique(bills.map((e) => e.id));
     unique(sales.map((e) => e.billId));
     unique(shifts.map((e) => e.id));
+    unique(cashMovements.map((e) => e.id));
+    unique(cashMovements.map((e) => e.requestId));
     unique(bills.where((e) => e.tableId != null).map((e) => e.tableId!));
     if (sequence < 0 ||
         areas.isEmpty ||
@@ -365,6 +434,25 @@ class PosData {
           !['cash', 'card'].contains(s.method) ||
           s.received < s.total) {
         throw const FormatException('Invalid transaction.');
+      }
+    }
+    for (final m in cashMovements) {
+      final reasons =
+          m.isOut ? CashMovement.outReasons : CashMovement.inReasons;
+      if (!shifts.any((s) => s.id == m.shiftId) ||
+          !['out', 'in'].contains(m.direction) ||
+          m.amount <= 0 ||
+          m.requestId.trim().isEmpty ||
+          m.requestId.length > 120 ||
+          m.person.trim().isEmpty ||
+          m.person.length > 120 ||
+          m.recordedBy.trim().isEmpty ||
+          m.recordedBy.length > 120 ||
+          !reasons.contains(m.reason) ||
+          m.note.length > 240 ||
+          m.approvedBy.length > 120 ||
+          (m.reason.startsWith('Other') && m.note.trim().isEmpty)) {
+        throw const FormatException('Invalid cash movement.');
       }
     }
   }

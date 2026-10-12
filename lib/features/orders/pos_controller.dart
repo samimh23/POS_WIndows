@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/storage/pos_repository.dart';
+import '../../core/utils/money.dart';
 import '../../models/pos_data.dart';
 
 final posProvider = ChangeNotifierProvider<PosController>(
@@ -275,6 +276,79 @@ class PosController extends ChangeNotifier {
     s.counted = counted;
     s.closedAt = DateTime.now();
   });
+
+  Future<CashMovement> recordCashMovement({
+    required String requestId,
+    required String shiftId,
+    required String direction,
+    required int amount,
+    required String person,
+    required String reason,
+    String note = '',
+    String approvedBy = '',
+  }) async {
+    final existing = data.cashMovements.where((m) => m.requestId == requestId);
+    if (existing.isNotEmpty) {
+      final m = existing.first;
+      if (m.shiftId != shiftId ||
+          m.direction != direction ||
+          m.amount != amount ||
+          m.person != person.trim() ||
+          m.reason != reason ||
+          m.note != note.trim() ||
+          m.approvedBy != approvedBy.trim()) {
+        throw StateError(
+          'This cash entry was already saved with different details.',
+        );
+      }
+      return m;
+    }
+    return _commit((d) {
+      final shift = d.activeShift;
+      if (shift == null || shift.id != shiftId) {
+        throw StateError(
+          'Open a shift first. The selected shift is no longer active.',
+        );
+      }
+      final reasons =
+          direction == 'out' ? CashMovement.outReasons : CashMovement.inReasons;
+      if (!['out', 'in'].contains(direction) ||
+          !reasons.contains(reason) ||
+          amount <= 0) {
+        throw StateError(
+          'Choose a cash reason and enter an amount greater than zero.',
+        );
+      }
+      if (direction == 'out' && amount > d.expectedCash(shift)) {
+        throw StateError(
+          'Cash out exceeds the expected drawer balance (${money(d.expectedCash(shift))}).',
+        );
+      }
+      if (note.trim().length > 240 ||
+          approvedBy.trim().length > 120 ||
+          (reason.startsWith('Other') && note.trim().isEmpty)) {
+        throw StateError(
+          'Add details for Other, using up to 240 characters. Approval name is limited to 120 characters.',
+        );
+      }
+      final movement = CashMovement(
+        d.nextId('cash'),
+        _text(requestId),
+        shift.id,
+        DateTime.now(),
+        direction,
+        amount,
+        _text(person),
+        reason,
+        shift.employee,
+        note: note.trim(),
+        approvedBy: approvedBy.trim(),
+      );
+      d.cashMovements.add(movement);
+      return movement;
+    });
+  }
+
   Future<void> settings(PosSettings value) => _commit((d) {
     _text(value.cafe);
     _text(value.station);

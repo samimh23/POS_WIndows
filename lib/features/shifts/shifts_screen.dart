@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../orders/pos_controller.dart';
 import '../../core/utils/money.dart';
 import '../../shared/widgets/pos_widgets.dart';
+import 'cash_movements.dart';
 
 Future<void> showOpenShift(BuildContext context, PosController pos) =>
     editDialog(
@@ -33,11 +34,13 @@ class ShiftsScreen extends ConsumerWidget {
         shift == null
             ? d.sales.where((_) => false).toList()
             : d.sales.where((s) => s.shiftId == shift.id).toList();
+    final movements =
+        d.cashMovements.where((m) => m.shiftId == shift?.id).toList();
     return ListView(
       children: [
         PageHeading(
           'Cashier & shifts',
-          'Track the drawer, completed sales, and closing discrepancies.',
+          'Track sales, cash withdrawals, money returned, and closing discrepancies.',
           action:
               shift == null
                   ? FilledButton.icon(
@@ -114,14 +117,71 @@ class ShiftsScreen extends ConsumerWidget {
                               .where((s) => s.method == 'card')
                               .fold(0, (a, s) => a + s.total),
                         ),
+                        amountRow(
+                          'Cash withdrawn',
+                          -d.cashMovementTotal(shift.id, 'out'),
+                        ),
+                        amountRow(
+                          'Cash added / returned',
+                          d.cashMovementTotal(shift.id, 'in'),
+                        ),
                         const Divider(),
                         amountRow(
                           'Expected cash',
                           d.expectedCash(shift),
                           bold: true,
                         ),
+                        const SizedBox(height: 16),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: [
+                            FilledButton.icon(
+                              onPressed:
+                                  pos.busy
+                                      ? null
+                                      : () => showCashMovement(
+                                        context,
+                                        pos,
+                                        cashOut: true,
+                                      ),
+                              icon: const Icon(Icons.call_made),
+                              label: const Text('Cash out'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed:
+                                  pos.busy
+                                      ? null
+                                      : () => showCashMovement(
+                                        context,
+                                        pos,
+                                        cashOut: false,
+                                      ),
+                              icon: const Icon(Icons.call_received),
+                              label: const Text('Cash in / return'),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
+                  ),
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          'Cash movements in current shift',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 14),
+        Card(
+          child:
+              movements.isEmpty
+                  ? const EmptyState(
+                    'No cash movements recorded in the current shift.',
+                  )
+                  : Column(
+                    children: [
+                      for (final m in movements.reversed) CashMovementTile(m),
+                    ],
                   ),
         ),
         const SizedBox(height: 24),
@@ -191,6 +251,19 @@ class ShiftsScreen extends ConsumerWidget {
                         s.counted! - s.expectedAtClose!,
                         bold: true,
                       ),
+                      if (d.cashMovements.any((m) => m.shiftId == s.id))
+                        ExpansionTile(
+                          tilePadding: EdgeInsets.zero,
+                          title: Text(
+                            'Cash movements · ${d.cashMovements.where((m) => m.shiftId == s.id).length}',
+                          ),
+                          children: [
+                            for (final m in d.cashMovements.reversed.where(
+                              (m) => m.shiftId == s.id,
+                            ))
+                              CashMovementTile(m),
+                          ],
+                        ),
                     ],
                   ),
                 ),

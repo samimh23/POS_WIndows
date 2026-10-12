@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:smart_pos/main.dart';
 import 'package:smart_pos/models/pos_data.dart';
 import 'package:smart_pos/features/orders/pos_controller.dart';
+import 'package:smart_pos/features/shifts/shifts_screen.dart';
 import 'pos_controller_test.dart' show MemoryRepository;
 
 void main() {
@@ -31,6 +32,128 @@ void main() {
     await tester.tap(finder);
     await tester.pumpAndSettle();
   }
+
+  testWidgets(
+    'cash out, returned change, and closed-shift audit work with touch amounts',
+    (tester) async {
+      final pos = await launch(tester, const Size(1366, 768));
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await pos.openShift('Sami', 200000);
+      await tap(tester, find.byTooltip('Cashier / Shifts'));
+      await tap(tester, find.text('Cash out'));
+      await tap(
+        tester,
+        find.byTooltip('Open number pad for Cash out amount (DT)'),
+      );
+      for (final digit in ['1', '0', '0']) {
+        await tap(tester, find.byKey(ValueKey('money-key-$digit')));
+      }
+      await tap(tester, find.byKey(const ValueKey('money-apply')));
+      await tap(
+        tester,
+        find.widgetWithText(DropdownButtonFormField<String>, 'Reason'),
+      );
+      await tap(tester, find.text('Business purchase').last);
+      await tap(
+        tester,
+        find.widgetWithText(
+          DropdownButtonFormField<String>,
+          'Who took the cash?',
+        ),
+      );
+      await tap(tester, find.text('Sami').last);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Approved by (optional)'),
+        'Owner',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Details (required for Other)'),
+        'Buy coffee beans',
+      );
+      await tap(tester, find.widgetWithText(FilledButton, 'Record cash out'));
+      expect(pos.data.cashMovements.single.amount, 100000);
+      expect(pos.data.cashMovements.single.person, 'Sami');
+      expect(pos.data.cashMovements.single.approvedBy, 'Owner');
+      expect(pos.data.expectedCash(pos.data.activeShift!), 100000);
+      expect(find.text('Business purchase · Sami'), findsOneWidget);
+      await tap(tester, find.text('Business purchase · Sami'));
+      expect(find.text('Approved by (recorded note): Owner'), findsOneWidget);
+      await tap(tester, find.text('Done'));
+      await tap(tester, find.text('Cash in / return'));
+      await tap(
+        tester,
+        find.byTooltip('Open number pad for Cash in amount (DT)'),
+      );
+      await tap(tester, find.byKey(const ValueKey('money-key-2')));
+      await tap(tester, find.byKey(const ValueKey('money-key-5')));
+      await tap(tester, find.byKey(const ValueKey('money-apply')));
+      await tap(tester, find.widgetWithText(FilledButton, 'Record cash in'));
+      expect(pos.data.expectedCash(pos.data.activeShift!), 125000);
+      expect(pos.data.sales, isEmpty);
+      await tester.scrollUntilVisible(
+        find.text('Close shift'),
+        -300,
+        scrollable:
+            find
+                .descendant(
+                  of: find.byType(ShiftsScreen),
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+      );
+      await tap(tester, find.text('Close shift'));
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Counted cash (DT)'),
+        '125.000',
+      );
+      await tap(tester, find.widgetWithText(FilledButton, 'Close shift'));
+      expect(pos.data.activeShift, isNull);
+      expect(pos.data.shifts.single.expectedAtClose, 125000);
+      await tester.scrollUntilVisible(
+        find.text('Cash movements · 2'),
+        300,
+        scrollable:
+            find
+                .descendant(
+                  of: find.byType(ShiftsScreen),
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+      );
+      await tap(tester, find.text('Cash movements · 2'));
+      expect(find.text('Business purchase · Sami'), findsOneWidget);
+      expect(find.text('Returned change · Sami'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'cash out above available drawer cash shows error and saves nothing',
+    (tester) async {
+      final pos = await launch(tester, const Size(1366, 768));
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await pos.openShift('Sami', 50000);
+      await tap(tester, find.byTooltip('Cashier / Shifts'));
+      await tap(tester, find.text('Cash out'));
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Cash out amount (DT)'),
+        '100.000',
+      );
+      await tap(tester, find.widgetWithText(FilledButton, 'Record cash out'));
+      expect(
+        find.text('Cash out exceeds the expected drawer balance (50.000 DT).'),
+        findsOneWidget,
+      );
+      expect(pos.data.cashMovements, isEmpty);
+      await tap(tester, find.text('Cancel'));
+      expect(pos.data.expectedCash(pos.data.activeShift!), 50000);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets(
     'empty table visits and removing the last item leave it available',

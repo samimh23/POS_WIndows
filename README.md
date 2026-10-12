@@ -52,10 +52,17 @@ A customer earns 12 points for this sale when loyalty is enabled. Points are the
 - Touchscreen money entry: a large number pad, decimal millimes, backspace, clear, exact amount, and 20/50/100 DT shortcuts. The same number pad is available from the dialpad icon for opening/counted shift cash, discounts, and product prices. Entering an amount never settles the bill; payment still requires the confirmation button.
 - Demo customers, phone numbers, completed purchase counts/spending, points balances, and purchase history.
 - Shifts with demo employee selection, opening cash, cash/card transaction totals, expected cash, closing count, and recorded discrepancies. Open bills can be paid in a later shift.
+- Cash out for owner withdrawals, business purchases, supplier payments, or another documented reason. Entries record the person taking the money, cashier, timestamp, details, and optional approval name. Cash in records returned change and drawer top-ups. Entries survive restart and remain visible in closed-shift history; sales and loyalty are unaffected.
 - Business/station settings, default area, shared/assigned zone mode, areas/tables CRUD, categories CRUD, products add/edit/price/enable/disable, loyalty toggle, light/dark theme.
 - Assigned zone mode filters the Tables view to this station's default area. Orders / Bills still provides access to every open local bill.
 - Restrictions prevent removing/editing occupied tables, deleting areas with tables, deleting categories with products, or removing the last area/category.
 - Settings and every order operation persist immediately. A failed write leaves the previous in-memory state intact and reports the error.
+
+## Drawer cash movements
+
+To record an owner taking **100.000 DT**, open **Cashier / Shifts → Cash out**, enter the amount using the number pad, select **Owner withdrawal** and **Owner**, then **Record cash out**. For a worker buying supplies, choose **Business purchase**, select the worker, and enter details and the approval name if useful. If the worker returns **25.000 DT** unused, use **Cash in / return → Returned change**. Expected drawer cash becomes opening cash + cash sales + cash added/returned − cash withdrawn. Cash withdrawals cannot exceed the expected drawer balance. Open a shift before recording cash movements.
+
+Cash entries cannot be edited or silently deleted. If an entry needs correction, record the opposite movement using **Other cash in/out**, with a note explaining which entry is being corrected. Approval names are recorded notes; demo employees have no enforced permissions or authentication. Closing discrepancy compares counted cash with the adjusted expected cash.
 
 ## Storage and recovery
 
@@ -92,6 +99,7 @@ lib/
     checkout/checkout_screen.dart
     customers/customers_screen.dart
     shifts/shifts_screen.dart
+    shifts/cash_movements.dart        cash entry forms and audit details
     settings/settings_screen.dart
   shared/widgets/pos_widgets.dart    forms, error feedback, bill details, shared UI
   shared/widgets/money_keypad.dart   reusable touchscreen TND entry
@@ -99,8 +107,10 @@ test/
   pos_controller_test.dart           monetary, settlement, loyalty, shifts, persistence
   pos_widget_test.dart               workflows + desktop layouts in both themes
   money_keypad_test.dart             touch entry, correction, presets, layout checks
+  cash_movements_test.dart           drawer ledger, retry protection, closing and restart
 integration_test/
   windows_workflow_test.dart         compiled native workflow + separate restart stage
+  windows_cash_movements_test.dart   touch withdrawals/returns + saved shift audit
 windows/                            real Windows runner and build files
 ```
 
@@ -119,6 +129,8 @@ flutter test integration_test\windows_workflow_test.dart -d windows
 ```
 
 Optional `SMART_POS_PREVIEW_DIR` saves screenshots from the actual rendered Windows app. The standard suite checks 1366×768, 1920×1080, and 1000×650 layouts with light and dark themes. Native tests additionally use the real Windows fonts and disk persistence.
+
+For the drawer cash workflow, use another empty test directory and run `integration_test\windows_cash_movements_test.dart` with `SMART_POS_VERIFY_STAGE=workflow`, then `restart`. It checks a 100.000 DT owner withdrawal and 25.000 DT returned change against 200.000 DT opening cash, closes with 125.000 DT counted, and reads the cash audit after a fresh process restart.
 
 ## Deliberately unavailable / limitations
 
